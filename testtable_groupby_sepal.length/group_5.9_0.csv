@@ -1,0 +1,4 @@
+sepal.length,sepal.width,petal.length,petal.width,variety
+5.9,3,4.2,1.5,Versicolor
+5.9,3.2,4.8,1.8,Versicolor
+5.9,3,5.1,1.8,Virginica
