@@ -1,10 +1,30 @@
 import cmd
 from functions import MyFunctions
-
+from handle import handle_tilde_command, handle_search_with_condition
 class MyCLI(cmd.Cmd):
     intro = "Welcome to the CLI!"
     prompt = 'evbase> '
 
+    def do_help(self, arg):
+        print("Custom CLI Commands:")
+        print("  ! db [dbname] - Create or set the active database.\n")
+        print("  ! table [tablename] - Create or set the active table.\n")
+        print("  () 'path.csv' <tablename> - load a csv file into specified table name")
+        print("  + [record1,record2,...] [dbtable(optional)] - Append records to the last chunk.\n")
+        print("  - val1 val2 val3 ... - removes matching records from the table.\n ")
+        print("  [>], [<], [>=], [<=] [column] [value] [show] [columns(optional)] - Conditional search.\n")
+        print("  = [column] [value] [show] [columns(optional)] - Exact match search.\n")
+        print("  [] [column] - Group by column.\n")
+        print("  @ [column] - Order by column.\n")
+        print("  && [dbtable1] [dbtable2] [column1] [column2] - Inner join two tables.\n")
+        print("  # [dbtable] - Count records in a table.\n")
+        print("  */# [column] - Average of a numeric column.\n")
+        print("  ^ [column] - Find max value in a column.\n")
+        print("  _ [column] - Find min value in a column.\n")
+        print("  ~ [val1] [val2] ... with [newval1] [newval2] ... - Update records.\n")
+        print("  delete table [dbtable] - Delete a table.\n")
+        print("  show tables - Show all tables in the active database.\n")
+        print("  show databases - SHow all available databases,\n")
     def __init__(self):
         super().__init__()
         self.functions = MyFunctions(self)
@@ -20,7 +40,6 @@ class MyCLI(cmd.Cmd):
     def do_exit(self, line):
         """Exit the CLI"""
         return True
-
     '''
     def do_db(self, line):
         """Create or set the active database"""
@@ -80,33 +99,12 @@ class MyCLI(cmd.Cmd):
                 self.functions.add_records_to_table(records,dbtable)
             else:
                 print("No active table. Use '! table dbtable' to set the active table.")
-        elif len(parts) >= 3 and parts[0] == '=':
-            search_column = parts[1]
-            search_value = parts[2]
 
-            # Determine if a specific table is specified and where the display columns start
-            dbtable = self.functions.active_table
-            display_columns_start = 3
-            if len(parts) > 3 and parts[3].lower() != 'show':
-                dbtable = parts[3]
-                display_columns_start = 4
-
-            # Check if specific columns to display are specified
-            display_columns = None
-            if len(parts) > display_columns_start and parts[display_columns_start].lower() == 'show':
-                display_columns = parts[display_columns_start + 1:]
-
-            self.functions.search_in_folder(search_column, search_value, dbtable, display_columns)
         elif len(parts) == 2 and parts[0] == 'show' and parts[1] == 'active':
             self.functions.show_active()
         elif len(parts) == 2 and parts[0] == '=':
             dbtable = parts[1]
             self.functions.show_entire_table(dbtable)
-        elif len(parts) >= 3 and parts[0] == '-' and parts[1] == '=':
-            column = parts[2]
-            value = parts[3]
-            dbtable = self.functions.active_table if len(parts) == 4 else parts[4]
-            self.functions.delete_records(column, value, dbtable)
         elif len(parts) == 2 and parts[0] == '#':
             dbtable = parts[1] if len(parts) > 1 else self.functions.active_table
             count = self.functions.count_records(dbtable)
@@ -141,29 +139,68 @@ class MyCLI(cmd.Cmd):
                 print(f"Minimum value in column '{column}' of '{dbtable}': {min_value}")
             else:
                 print(f"Could not determine the minimum value in column '{column}' of '{dbtable}'.")
+        
         elif line.startswith("[] "):
-            _, column = line.split(maxsplit=1)
+            parts = line.split()
+            column = parts[1]
+            save_results = 'save' in parts
+
             if self.functions.active_table:
-                # Group by column
-                self.functions.group_by_column(self.functions.active_table, column)
+                self.functions.group_by_column(self.functions.active_table, column, chunk_size=500)
+                if not save_results:
+                    #print(f"{self.functions.active_table}_orderby_{column}")
+                    self.functions.print_and_delete_folder(f"{self.functions.active_table}")
+                    print('Table deleted, remember to set a new active table')
 
-                # Print and delete folder
-                self.functions.print_and_delete_folder(f"{self.functions.active_table}_groupby_{column}")
-
-            else:
-                print("No active table. Use '! table dbtable' to set the active table.")
-
+        # Handling for '@' command
         elif line.startswith("@ "):
-            _, column = line.split(maxsplit=1)
+            parts = line.split()
+            column = parts[1]
+            save_results = 'save' in parts
+
             if self.functions.active_table:
-                # Order by column
-                self.functions.order_by_column(self.functions.active_table, column)
+                self.functions.order_by_column(self.functions.active_table, column,chunk_size=500)
+                if not save_results:
+                    #print(f"{self.functions.active_table}_orderby_{column}")
+                    self.functions.print_and_delete_folder(f"{self.functions.active_table}")
+                    print('Table deleted, remember to set a new active table')
+                    self.functions.active_table=None
 
-                # Print and delete folder
-                self.functions.print_and_delete_folder(f"{self.functions.active_table}_orderby_{column}")
-
+        elif line.startswith(('=', '>', '<', '>=', '<=')):
+            handle_search_with_condition(line, self.functions)
+        elif line.strip() == 'show tables':
+            self.functions.show_tables()
+        elif line.startswith('delete table '):
+            dbtable = line[len('delete table '):].strip()
+            self.functions.delete_table(dbtable)
+        elif line.startswith('~ '):
+            handle_tilde_command(line[2:],self.functions)
+        elif line.startswith("&&"):
+            parts = line.split()
+            dbtable1, dbtable2, column1, column2 = parts[1:5]
+            save_results = 'save' in parts
+            if save_results:
+                output_table = (f"{dbtable1}_joined_table_{dbtable2}")  # or any other naming convention
+                self.functions.create_or_set_table(output_table)
+            self.functions.join_tables(dbtable1, dbtable2, column1, column2, output_table)
+        elif line == 'show databases':
+            self.functions.show_databases()
+        elif line.startswith('delete database '):
+            dbname = line[len('delete database '):].strip()
+            self.functions.delete_database(dbname)
+        elif line.startswith('-'):
+            # Split the line to extract the values
+            parts = line.split(maxsplit=1)
+            if len(parts) == 2:
+                values_str = parts[1]
+                old_values = values_str.split()
+                if self.functions.active_table:
+                    # Call the remove_records method with the provided values
+                    self.functions.remove_records(old_values)
+                else:
+                    print("No active table. Use '! table dbtable' to set the active table.")
             else:
-                print("No active table. Use '! table dbtable' to set the active table.")
+                print("Invalid syntax. Use '- val1 val2 ...' to remove records.")
         else:
             print(f"Unknown syntax: {line}")
 if __name__ == "__main__":
