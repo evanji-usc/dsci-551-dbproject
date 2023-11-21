@@ -151,6 +151,8 @@ class MyCLI(cmd.Cmd):
                     #print(f"{self.functions.active_table}_orderby_{column}")
                     self.functions.print_and_delete_folder(f"{self.functions.active_table}")
                     print('Table deleted, remember to set a new active table')
+            else:
+                print("No active table set. Use '! table dbtable' to set the active table.")
 
         # Handling for '@' command
         elif line.startswith("@ "):
@@ -165,6 +167,8 @@ class MyCLI(cmd.Cmd):
                     self.functions.print_and_delete_folder(f"{self.functions.active_table}")
                     print('Table deleted, remember to set a new active table')
                     self.functions.active_table=None
+            else:
+                print("No active table set. Use '! table dbtable' to set the active table.")
 
         elif line.startswith(('=', '>', '<', '>=', '<=')):
             handle_search_with_condition(line, self.functions)

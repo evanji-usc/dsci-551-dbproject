@@ -3,6 +3,7 @@ import csv
 import os
 import shutil
 import re
+import heapq
 class MyFunctions:
     def __init__(self, cli):
         self.cli = cli
@@ -434,6 +435,9 @@ class MyFunctions:
             return None
     
     def group_by_column(self, dbtable, column, chunk_size=5000):
+        if not self.active_table:
+            print("No active table set. Use '! table dbtable' to set the active table.")
+            return
         folder_path = dbtable
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             print(f"Table '{dbtable}' does not exist or is not a directory.")
@@ -441,8 +445,9 @@ class MyFunctions:
 
         grouped_data = {}
         header = None
+        col_index = None
 
-        try:# Grouping data
+        try:
             for file_name in os.listdir(folder_path):
                 if file_name.endswith(".csv"):
                     file_path = os.path.join(folder_path, file_name)
@@ -461,22 +466,27 @@ class MyFunctions:
             print(f"Column '{column}' not found in table '{dbtable}'.")
             return
 
-        # Creating chunks for grouped data
+        # Write the grouped data from all chunks
         new_folder = f"{dbtable}_groupby_{column}"
         self.create_or_set_table(new_folder)
         self.write_grouped_data_in_chunks(grouped_data, header, new_folder, chunk_size)
-
         print(f"Grouped data saved in chunks in '{new_folder}'")
+
     def order_by_column(self, dbtable, column, chunk_size=500):
+        if not self.active_table:
+            print("No active table set. Use '! table dbtable' to set the active table.")
+            return
         folder_path = dbtable
         if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
             print(f"Table '{dbtable}' does not exist or is not a directory.")
             return
 
-        all_data = []
+        temp_files = []
         header = None
+        col_index = None
 
-        try:# Sorting data
+        # Sort each chunk and write to a temp file
+        try:
             for file_name in os.listdir(folder_path):
                 if file_name.endswith(".csv"):
                     file_path = os.path.join(folder_path, file_name)
@@ -488,20 +498,65 @@ class MyFunctions:
                         else:
                             next(csvreader, None)  # Skip header in subsequent files
 
-                        all_data.extend(csvreader)
-
-            all_data.sort(key=lambda x: x[col_index])
+                        chunk_data = sorted(csvreader, key=lambda x: x[col_index])
+                        temp_file_path = os.path.join(folder_path, f"temp_sorted_{file_name}")
+                        with open(temp_file_path, 'w', newline='') as temp_file:
+                            csvwriter = csv.writer(temp_file)
+                            csvwriter.writerows(chunk_data)
+                        temp_files.append(temp_file_path)
         except ValueError:
             print(f"Column '{column}' not found in table '{dbtable}'.")
-            return   
+            return
 
-        # Creating chunks for sorted data
+        # Merge sorted chunks and write in new chunks
         new_folder = f"{dbtable}_orderby_{column}"
         self.create_or_set_table(new_folder)
-        self.write_grouped_data_in_chunks(all_data, header, new_folder, chunk_size)
+
+        # Initialize heap
+        sorted_data = []
+        file_pointers = []
+        try:
+            for temp_file in temp_files:
+                fp = open(temp_file, 'r')
+                reader = csv.reader(fp)
+                file_pointers.append(fp)
+                next(reader, None)  # Skip header
+                for row in reader:
+                    heapq.heappush(sorted_data, (row[col_index], row))
+
+            # Write the merged sorted data in chunks based on size
+            chunk_count = 0
+            current_chunk_size = 0
+            chunk = []
+
+            while sorted_data:
+                _, row = heapq.heappop(sorted_data)
+                row_string = ','.join(row) + '\n'
+                row_size = sum(len(str(cell)) for cell in row)
+
+                if current_chunk_size + row_size > chunk_size and chunk:
+                    chunk_file = os.path.join(new_folder, f"chunk_{chunk_count}.csv")
+                    self.process_chunk(chunk_file, chunk, header, first_chunk=(chunk_count == 0))
+                    chunk_count += 1
+                    chunk = []
+                    current_chunk_size = 0
+
+                chunk.append(row)
+                current_chunk_size += row_size
+
+            # Write the last chunk if it has data
+            if chunk:
+                chunk_file = os.path.join(new_folder, f"chunk_{chunk_count}.csv")
+                self.process_chunk(chunk_file, chunk, header, first_chunk=(chunk_count == 0))
+        finally:
+            for fp in file_pointers:
+                fp.close()
+
+        # Clean up temp files
+        for temp_file in temp_files:
+            os.remove(temp_file)
 
         print(f"Ordered data saved in chunks in '{new_folder}'")
-
 
     def print_and_delete_folder(self, folder_path):
         if os.path.exists(folder_path) and os.path.isdir(folder_path):
